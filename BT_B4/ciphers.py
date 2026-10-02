@@ -1,6 +1,88 @@
 from math import gcd
 
 
+def _left_rotate(value: int, amount: int, bits: int = 32) -> int:
+    value &= (1 << bits) - 1
+    return ((value << amount) | (value >> (bits - amount))) & ((1 << bits) - 1)
+
+
+_MD5_SHIFT = [7, 12, 17, 22] * 4 + [5, 9, 14, 20] * 4 + [4, 11, 16, 23] * 4 + [6, 10, 15, 21] * 4
+_MD5_K = [
+    0xD76AA478, 0xE8C7B756, 0x242070DB, 0xC1BDCEEE, 0xF57C0FAF, 0x4787C62A, 0xA8304613, 0xFD469501,
+    0x698098D8, 0x8B44F7AF, 0xFFFF5BB1, 0x895CD7BE, 0x6B901122, 0xFD987193, 0xA679438E, 0x49B40821,
+    0xF61E2562, 0xC040B340, 0x265E5A51, 0xE9B6C7AA, 0xD62F105D, 0x02441453, 0xD8A1E681, 0xE7D3FBC8,
+    0x21E1CDE6, 0xC33707D6, 0xF4D50D87, 0x455A14ED, 0xA9E3E905, 0xFCEFA3F8, 0x676F02D9, 0x8D2A4C8A,
+    0xFFFA3942, 0x8771F681, 0x6D9D6122, 0xFDE5380C, 0xA4BEEA44, 0x4BDECFA9, 0xF6BB4B60, 0xBEBFBC70,
+    0x289B7EC6, 0xEAA127FA, 0xD4EF3085, 0x04881D05, 0xD9D4D039, 0xE6DB99E5, 0x1FA27CF8, 0xC4AC5665,
+    0xF4292244, 0x432AFF97, 0xAB9423A7, 0xFC93A039, 0x655B59C3, 0x8F0CCC92, 0xFFEFF47D, 0x85845DD1,
+    0x6FA87E4F, 0xFE2CE6E0, 0xA3014314, 0x4E0811A1, 0xF7537E82, 0xBD3AF235, 0x2AD7D2BB, 0xEB86D391,
+]
+
+
+def md5_text(text: str) -> str:
+    data = bytearray(text.encode("utf-8"))
+    bit_length = len(data) * 8
+    data.append(0x80)
+    data.extend(b"\x00" * ((56 - len(data) % 64) % 64))
+    data.extend(bit_length.to_bytes(8, "little"))
+    a, b, c, d = 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476
+    for offset in range(0, len(data), 64):
+        words = [int.from_bytes(data[offset + i:offset + i + 4], "little") for i in range(0, 64, 4)]
+        aa, bb, cc, dd = a, b, c, d
+        for index in range(64):
+            if index < 16:
+                function, word_index = (b & c) | (~b & d), index
+            elif index < 32:
+                function, word_index = (d & b) | (~d & c), (5 * index + 1) % 16
+            elif index < 48:
+                function, word_index = b ^ c ^ d, (3 * index + 5) % 16
+            else:
+                function, word_index = c ^ (b | ~d), (7 * index) % 16
+            value = (a + function + _MD5_K[index] + words[word_index]) & 0xFFFFFFFF
+            a, d, c, b = d, c, b, (b + _left_rotate(value, _MD5_SHIFT[index])) & 0xFFFFFFFF
+        a, b, c, d = (a + aa) & 0xFFFFFFFF, (b + bb) & 0xFFFFFFFF, (c + cc) & 0xFFFFFFFF, (d + dd) & 0xFFFFFFFF
+    return b"".join(value.to_bytes(4, "little") for value in (a, b, c, d)).hex().upper()
+
+
+_SHA256_K = [
+    0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5, 0x3956C25B, 0x59F111F1, 0x923F82A4, 0xAB1C5ED5,
+    0xD807AA98, 0x12835B01, 0x243185BE, 0x550C7DC3, 0x72BE5D74, 0x80DEB1FE, 0x9BDC06A7, 0xC19BF174,
+    0xE49B69C1, 0xEFBE4786, 0x0FC19DC6, 0x240CA1CC, 0x2DE92C6F, 0x4A7484AA, 0x5CB0A9DC, 0x76F988DA,
+    0x983E5152, 0xA831C66D, 0xB00327C8, 0xBF597FC7, 0xC6E00BF3, 0xD5A79147, 0x06CA6351, 0x14292967,
+    0x27B70A85, 0x2E1B2138, 0x4D2C6DFC, 0x53380D13, 0x650A7354, 0x766A0ABB, 0x81C2C92E, 0x92722C85,
+    0xA2BFE8A1, 0xA81A664B, 0xC24B8B70, 0xC76C51A3, 0xD192E819, 0xD6990624, 0xF40E3585, 0x106AA070,
+    0x19A4C116, 0x1E376C08, 0x2748774C, 0x34B0BCB5, 0x391C0CB3, 0x4ED8AA4A, 0x5B9CCA4F, 0x682E6FF3,
+    0x748F82EE, 0x78A5636F, 0x84C87814, 0x8CC70208, 0x90BEFFFA, 0xA4506CEB, 0xBEF9A3F7, 0xC67178F2,
+]
+
+
+def sha256_text(text: str) -> str:
+    data = bytearray(text.encode("utf-8"))
+    bit_length = len(data) * 8
+    data.append(0x80)
+    data.extend(b"\x00" * ((56 - len(data) % 64) % 64))
+    data.extend(bit_length.to_bytes(8, "big"))
+    state = [0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19]
+    for offset in range(0, len(data), 64):
+        words = [int.from_bytes(data[offset + i:offset + i + 4], "big") for i in range(0, 64, 4)]
+        for index in range(16, 64):
+            first = _left_rotate(words[index - 15], 25) ^ _left_rotate(words[index - 15], 14) ^ (words[index - 15] >> 3)
+            second = _left_rotate(words[index - 2], 15) ^ _left_rotate(words[index - 2], 13) ^ (words[index - 2] >> 10)
+            words.append((words[index - 16] + first + words[index - 7] + second) & 0xFFFFFFFF)
+        working = state[:]
+        for index in range(64):
+            a, b, c, d, e, f, g, h = working
+            sigma_one = _left_rotate(e, 26) ^ _left_rotate(e, 21) ^ _left_rotate(e, 7)
+            choose = (e & f) ^ (~e & g)
+            temp_one = (h + sigma_one + choose + _SHA256_K[index] + words[index]) & 0xFFFFFFFF
+            sigma_zero = _left_rotate(a, 30) ^ _left_rotate(a, 19) ^ _left_rotate(a, 10)
+            majority = (a & b) ^ (a & c) ^ (b & c)
+            temp_two = (sigma_zero + majority) & 0xFFFFFFFF
+            working = [(temp_one + temp_two) & 0xFFFFFFFF, a, b, c, (d + temp_one) & 0xFFFFFFFF, e, f, g]
+        state = [(left + right) & 0xFFFFFFFF for left, right in zip(state, working)]
+    return b"".join(value.to_bytes(4, "big") for value in state).hex().upper()
+
+
 def caesar_encrypt(text: str, key: int, alphabet: str) -> str:
     result = []
     m = len(alphabet)
@@ -560,6 +642,195 @@ def des_decrypt(ciphertext_hex: str, key: str) -> str:
         return "0x" + plaintext_bytes.hex().upper()
 
 
+def _aes_gf_mul(left: int, right: int) -> int:
+    result = 0
+    for _ in range(8):
+        if right & 1:
+            result ^= left
+        left = ((left << 1) ^ (0x11B if left & 0x80 else 0)) & 0xFF
+        right >>= 1
+    return result
+
+
+def _aes_sbox_value(value: int) -> int:
+    inverse = 0 if value == 0 else next(
+        candidate for candidate in range(1, 256) if _aes_gf_mul(value, candidate) == 1
+    )
+    rotated = inverse
+    for shift in (1, 2, 3, 4):
+        rotated ^= ((inverse << shift) | (inverse >> (8 - shift))) & 0xFF
+    return rotated ^ 0x63
+
+
+_AES_SBOX = [_aes_sbox_value(value) for value in range(256)]
+_AES_INV_SBOX = [0] * 256
+for _value, _substituted in enumerate(_AES_SBOX):
+    _AES_INV_SBOX[_substituted] = _value
+
+
+def _aes_key_bytes(key: str) -> bytes:
+    key = key.strip()
+    hex_part = key[2:] if key.lower().startswith("0x") else key
+    if len(hex_part) == 32 and _is_pure_hex(hex_part):
+        return bytes.fromhex(hex_part)
+    key_bytes = key.encode("utf-8")
+    if len(key_bytes) != 16:
+        raise ValueError("Khóa AES-128 phải có đúng 16 ký tự UTF-8 hoặc 32 ký tự hex.")
+    return key_bytes
+
+
+def _aes_round_keys(key: bytes) -> list[list[int]]:
+    words = [list(key[index:index + 4]) for index in range(0, 16, 4)]
+    rcon = 1
+    while len(words) < 44:
+        word = words[-1][:]
+        if len(words) % 4 == 0:
+            word = word[1:] + word[:1]
+            word = [_AES_SBOX[value] for value in word]
+            word[0] ^= rcon
+            rcon = _aes_gf_mul(rcon, 2)
+        words.append([left ^ right for left, right in zip(words[-4], word)])
+    return [sum(words[index:index + 4], []) for index in range(0, 44, 4)]
+
+
+def _aes_add_round_key(state: list[int], round_key: list[int]) -> None:
+    for index in range(16):
+        state[index] ^= round_key[index]
+
+
+def _aes_sub_bytes(state: list[int], inverse: bool = False) -> None:
+    box = _AES_INV_SBOX if inverse else _AES_SBOX
+    for index in range(16):
+        state[index] = box[state[index]]
+
+
+def _aes_shift_rows(state: list[int], inverse: bool = False) -> None:
+    original = state[:]
+    for row in range(4):
+        for column in range(4):
+            source_column = (column - row if inverse else column + row) % 4
+            state[4 * column + row] = original[4 * source_column + row]
+
+
+def _aes_mix_columns(state: list[int], inverse: bool = False) -> None:
+    coefficients = (14, 11, 13, 9) if inverse else (2, 3, 1, 1)
+    for column in range(4):
+        offset = column * 4
+        values = state[offset:offset + 4]
+        state[offset] = (
+            _aes_gf_mul(values[0], coefficients[0])
+            ^ _aes_gf_mul(values[1], coefficients[1])
+            ^ _aes_gf_mul(values[2], coefficients[2])
+            ^ _aes_gf_mul(values[3], coefficients[3])
+        )
+        state[offset + 1] = (
+            _aes_gf_mul(values[0], coefficients[3])
+            ^ _aes_gf_mul(values[1], coefficients[0])
+            ^ _aes_gf_mul(values[2], coefficients[1])
+            ^ _aes_gf_mul(values[3], coefficients[2])
+        )
+        state[offset + 2] = (
+            _aes_gf_mul(values[0], coefficients[2])
+            ^ _aes_gf_mul(values[1], coefficients[3])
+            ^ _aes_gf_mul(values[2], coefficients[0])
+            ^ _aes_gf_mul(values[3], coefficients[1])
+        )
+        state[offset + 3] = (
+            _aes_gf_mul(values[0], coefficients[1])
+            ^ _aes_gf_mul(values[1], coefficients[2])
+            ^ _aes_gf_mul(values[2], coefficients[3])
+            ^ _aes_gf_mul(values[3], coefficients[0])
+        )
+
+
+def _aes_transform_block(block: bytes, round_keys: list[list[int]], decrypt: bool) -> bytes:
+    state = list(block)
+    if decrypt:
+        _aes_add_round_key(state, round_keys[10])
+        for round_key in reversed(round_keys[1:10]):
+            _aes_shift_rows(state, inverse=True)
+            _aes_sub_bytes(state, inverse=True)
+            _aes_add_round_key(state, round_key)
+            _aes_mix_columns(state, inverse=True)
+        _aes_shift_rows(state, inverse=True)
+        _aes_sub_bytes(state, inverse=True)
+        _aes_add_round_key(state, round_keys[0])
+    else:
+        _aes_add_round_key(state, round_keys[0])
+        for round_key in round_keys[1:10]:
+            _aes_sub_bytes(state)
+            _aes_shift_rows(state)
+            _aes_mix_columns(state)
+            _aes_add_round_key(state, round_key)
+        _aes_sub_bytes(state)
+        _aes_shift_rows(state)
+        _aes_add_round_key(state, round_keys[10])
+    return bytes(state)
+
+
+def _aes_pad(data: bytes) -> bytes:
+    padding = 16 - len(data) % 16
+    return data + bytes([padding] * padding)
+
+
+def aes_encrypt(plaintext: str, key: str) -> str:
+    round_keys = _aes_round_keys(_aes_key_bytes(key))
+    data = _aes_pad(plaintext.encode("utf-8"))
+    return b"".join(
+        _aes_transform_block(data[index:index + 16], round_keys, False)
+        for index in range(0, len(data), 16)
+    ).hex().upper()
+
+
+def aes_decrypt(ciphertext_hex: str, key: str) -> str:
+    try:
+        data = bytes.fromhex(ciphertext_hex.strip().replace(" ", ""))
+    except ValueError as error:
+        raise ValueError("Bản mã AES phải là chuỗi hex hợp lệ.") from error
+    if not data or len(data) % 16:
+        raise ValueError("Độ dài bản mã AES phải là bội số của 16 bytes.")
+    round_keys = _aes_round_keys(_aes_key_bytes(key))
+    plaintext = b"".join(
+        _aes_transform_block(data[index:index + 16], round_keys, True)
+        for index in range(0, len(data), 16)
+    )
+    padding = plaintext[-1]
+    if padding < 1 or padding > 16 or plaintext[-padding:] != bytes([padding] * padding):
+        raise ValueError("Padding AES không hợp lệ, có thể sai khóa.")
+    try:
+        return plaintext[:-padding].decode("utf-8")
+    except UnicodeDecodeError:
+        return "0x" + plaintext[:-padding].hex().upper()
+
+
+def rsa_encrypt(plaintext: str, p: int, q: int, e: int) -> str:
+    modulus = p * q
+    if p < 2 or q < 2 or p == q or gcd(e, (p - 1) * (q - 1)) != 1:
+        raise ValueError("RSA cần p, q khác nhau và e nguyên tố cùng nhau với phi(n).")
+    return " ".join(str(pow(byte, e, modulus)) for byte in plaintext.encode("utf-8"))
+
+
+def rsa_decrypt(ciphertext: str, p: int, q: int, e: int) -> str:
+    modulus = p * q
+    phi = (p - 1) * (q - 1)
+    if p < 2 or q < 2 or p == q or gcd(e, phi) != 1:
+        raise ValueError("RSA cần p, q khác nhau và e nguyên tố cùng nhau với phi(n).")
+    private_exponent = pow(e, -1, phi)
+    try:
+        data = bytes(pow(int(value), private_exponent, modulus) for value in ciphertext.split())
+        return data.decode("utf-8")
+    except (ValueError, OverflowError, UnicodeDecodeError) as error:
+        raise ValueError("Bản mã RSA phải là các số nguyên hợp lệ với đúng khóa.") from error
+
+
+def hash_text(text: str, algorithm: str) -> str:
+    if algorithm == "md5":
+        return md5_text(text)
+    if algorithm == "sha256":
+        return sha256_text(text)
+    raise ValueError("Thuật toán băm không được hỗ trợ.")
+
+
 def _self_check() -> None:
     z26 = "abcdefghijklmnopqrstuvwxyz"
     z29 = "aăâbcdđeêghiklmnoôơpqrstuưvxy"
@@ -578,6 +849,11 @@ def _self_check() -> None:
     assert des_decrypt(des_encrypt("Test 123 !@#", des_key), des_key) == "Test 123 !@#"
     assert des_encrypt("123456ABCD132536", "AABB09182736CCDD") == "C0B7A8D05F3A829C"
     assert des_encrypt("0x123456ABCD132536", "0xAABB09182736CCDD") == "C0B7A8D05F3A829C"
+    aes_key = "ThucHanhAES20260"
+    assert aes_decrypt(aes_encrypt("Xin chao AES!", aes_key), aes_key) == "Xin chao AES!"
+    assert rsa_decrypt(rsa_encrypt("RSA", 61, 53, 17), 61, 53, 17) == "RSA"
+    assert hash_text("abc", "md5") == "900150983CD24FB0D6963F7D28E17F72"
+    assert hash_text("abc", "sha256") == "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"
 
 
 if __name__ == "__main__":
