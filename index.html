@@ -157,6 +157,15 @@
         padding: 0 13px;
       }
 
+      select {
+        appearance: none;
+        padding-right: 44px;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none' stroke='%235d675f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 5 4 4 4-4'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 14px center;
+        background-size: 14px;
+      }
+
       textarea {
         min-height: 280px;
         resize: vertical;
@@ -1218,185 +1227,184 @@
               return "0x" + plaintext_bytes.hex().upper()
 
 
-          def _aes_gf_mul(left: int, right: int) -> int:
-            result = 0
-            for _ in range(8):
-              if right & 1:
-                result ^= left
-              left = ((left << 1) ^ (0x11B if left & 0x80 else 0)) & 0xFF
-              right >>= 1
-            return result
+      def _aes_gf_mul(left: int, right: int) -> int:
+        result = 0
+        for _ in range(8):
+          if right & 1:
+            result ^= left
+          left = ((left << 1) ^ (0x11B if left & 0x80 else 0)) & 0xFF
+          right >>= 1
+        return result
 
 
-          def _aes_sbox_value(value: int) -> int:
-            inverse = 0 if value == 0 else next(
-              candidate for candidate in range(1, 256) if _aes_gf_mul(value, candidate) == 1
+      def _aes_sbox_value(value: int) -> int:
+        inverse = 0 if value == 0 else next(
+          candidate for candidate in range(1, 256) if _aes_gf_mul(value, candidate) == 1
+        )
+        rotated = inverse
+        for shift in (1, 2, 3, 4):
+          rotated ^= ((inverse << shift) | (inverse >> (8 - shift))) & 0xFF
+        return rotated ^ 0x63
+
+
+      _AES_SBOX = [_aes_sbox_value(value) for value in range(256)]
+      _AES_INV_SBOX = [0] * 256
+      for _value, _substituted in enumerate(_AES_SBOX):
+        _AES_INV_SBOX[_substituted] = _value
+
+
+      def _aes_key_bytes(key: str) -> bytes:
+        key = key.strip()
+        hex_part = key[2:] if key.lower().startswith("0x") else key
+        if len(hex_part) == 32 and _is_pure_hex(hex_part):
+          return bytes.fromhex(hex_part)
+        key_bytes = key.encode("utf-8")
+        if len(key_bytes) != 16:
+          raise ValueError("Khóa AES-128 phải có đúng 16 ký tự UTF-8 hoặc 32 ký tự hex.")
+        return key_bytes
+
+
+      def _aes_round_keys(key: bytes) -> list[list[int]]:
+        words = [list(key[index:index + 4]) for index in range(0, 16, 4)]
+        rcon = 1
+        while len(words) < 44:
+          word = words[-1][:]
+          if len(words) % 4 == 0:
+            word = word[1:] + word[:1]
+            word = [_AES_SBOX[value] for value in word]
+            word[0] ^= rcon
+            rcon = _aes_gf_mul(rcon, 2)
+          words.append([left ^ right for left, right in zip(words[-4], word)])
+        return [sum(words[index:index + 4], []) for index in range(0, 44, 4)]
+
+
+      def _aes_add_round_key(state: list[int], round_key: list[int]) -> None:
+        for index in range(16):
+          state[index] ^= round_key[index]
+
+
+      def _aes_sub_bytes(state: list[int], inverse: bool = False) -> None:
+        box = _AES_INV_SBOX if inverse else _AES_SBOX
+        for index in range(16):
+          state[index] = box[state[index]]
+
+
+      def _aes_shift_rows(state: list[int], inverse: bool = False) -> None:
+        original = state[:]
+        for row in range(4):
+          for column in range(4):
+            source_column = (column - row if inverse else column + row) % 4
+            state[4 * column + row] = original[4 * source_column + row]
+
+
+      def _aes_mix_columns(state: list[int], inverse: bool = False) -> None:
+        coefficients = (14, 11, 13, 9) if inverse else (2, 3, 1, 1)
+        for column in range(4):
+          offset = column * 4
+          values = state[offset:offset + 4]
+          state[offset] = (
+              _aes_gf_mul(values[0], coefficients[0]) ^ _aes_gf_mul(values[1], coefficients[1])
+              ^ _aes_gf_mul(values[2], coefficients[2]) ^ _aes_gf_mul(values[3], coefficients[3])
             )
-            rotated = inverse
-            for shift in (1, 2, 3, 4):
-              rotated ^= ((inverse << shift) | (inverse >> (8 - shift))) & 0xFF
-            return rotated ^ 0x63
+          state[offset + 1] = (
+            _aes_gf_mul(values[0], coefficients[3]) ^ _aes_gf_mul(values[1], coefficients[0])
+            ^ _aes_gf_mul(values[2], coefficients[1]) ^ _aes_gf_mul(values[3], coefficients[2])
+          )
+          state[offset + 2] = (
+            _aes_gf_mul(values[0], coefficients[2]) ^ _aes_gf_mul(values[1], coefficients[3])
+            ^ _aes_gf_mul(values[2], coefficients[0]) ^ _aes_gf_mul(values[3], coefficients[1])
+          )
+          state[offset + 3] = (
+            _aes_gf_mul(values[0], coefficients[1]) ^ _aes_gf_mul(values[1], coefficients[2])
+            ^ _aes_gf_mul(values[2], coefficients[3]) ^ _aes_gf_mul(values[3], coefficients[0])
+          )
 
 
-          _AES_SBOX = [_aes_sbox_value(value) for value in range(256)]
-          _AES_INV_SBOX = [0] * 256
-          for _value, _substituted in enumerate(_AES_SBOX):
-            _AES_INV_SBOX[_substituted] = _value
+      def _aes_transform_block(block: bytes, round_keys: list[list[int]], decrypt: bool) -> bytes:
+        state = list(block)
+        if decrypt:
+          _aes_add_round_key(state, round_keys[10])
+          for round_key in reversed(round_keys[1:10]):
+            _aes_shift_rows(state, inverse=True)
+            _aes_sub_bytes(state, inverse=True)
+            _aes_add_round_key(state, round_key)
+            _aes_mix_columns(state, inverse=True)
+          _aes_shift_rows(state, inverse=True)
+          _aes_sub_bytes(state, inverse=True)
+          _aes_add_round_key(state, round_keys[0])
+        else:
+          _aes_add_round_key(state, round_keys[0])
+          for round_key in round_keys[1:10]:
+            _aes_sub_bytes(state)
+            _aes_shift_rows(state)
+            _aes_mix_columns(state)
+            _aes_add_round_key(state, round_key)
+          _aes_sub_bytes(state)
+          _aes_shift_rows(state)
+          _aes_add_round_key(state, round_keys[10])
+        return bytes(state)
 
 
-          def _aes_key_bytes(key: str) -> bytes:
-            key = key.strip()
-            hex_part = key[2:] if key.lower().startswith("0x") else key
-            if len(hex_part) == 32 and _is_pure_hex(hex_part):
-              return bytes.fromhex(hex_part)
-            key_bytes = key.encode("utf-8")
-            if len(key_bytes) != 16:
-              raise ValueError("Khóa AES-128 phải có đúng 16 ký tự UTF-8 hoặc 32 ký tự hex.")
-            return key_bytes
+      def aes_encrypt(plaintext: str, key: str) -> str:
+        round_keys = _aes_round_keys(_aes_key_bytes(key))
+        data = plaintext.encode("utf-8")
+        padding = 16 - len(data) % 16
+        data += bytes([padding] * padding)
+        return b"".join(
+          _aes_transform_block(data[index:index + 16], round_keys, False)
+          for index in range(0, len(data), 16)
+        ).hex().upper()
 
 
-          def _aes_round_keys(key: bytes) -> list[list[int]]:
-            words = [list(key[index:index + 4]) for index in range(0, 16, 4)]
-            rcon = 1
-            while len(words) < 44:
-              word = words[-1][:]
-              if len(words) % 4 == 0:
-                word = word[1:] + word[:1]
-                word = [_AES_SBOX[value] for value in word]
-                word[0] ^= rcon
-                rcon = _aes_gf_mul(rcon, 2)
-              words.append([left ^ right for left, right in zip(words[-4], word)])
-            return [sum(words[index:index + 4], []) for index in range(0, 44, 4)]
+      def aes_decrypt(ciphertext_hex: str, key: str) -> str:
+        try:
+          data = bytes.fromhex(ciphertext_hex.strip().replace(" ", ""))
+        except ValueError as error:
+          raise ValueError("Bản mã AES phải là chuỗi hex hợp lệ.") from error
+        if not data or len(data) % 16:
+          raise ValueError("Độ dài bản mã AES phải là bội số của 16 bytes.")
+        round_keys = _aes_round_keys(_aes_key_bytes(key))
+        plaintext = b"".join(
+          _aes_transform_block(data[index:index + 16], round_keys, True)
+          for index in range(0, len(data), 16)
+        )
+        padding = plaintext[-1]
+        if padding < 1 or padding > 16 or plaintext[-padding:] != bytes([padding] * padding):
+          raise ValueError("Padding AES không hợp lệ, có thể sai khóa.")
+        try:
+          return plaintext[:-padding].decode("utf-8")
+        except UnicodeDecodeError:
+          return "0x" + plaintext[:-padding].hex().upper()
 
 
-          def _aes_add_round_key(state: list[int], round_key: list[int]) -> None:
-            for index in range(16):
-              state[index] ^= round_key[index]
+      def rsa_encrypt(plaintext: str, p: int, q: int, e: int) -> str:
+        modulus = p * q
+        phi = (p - 1) * (q - 1)
+        if p < 2 or q < 2 or p == q or gcd(e, phi) != 1 or modulus <= 255:
+          raise ValueError("RSA cần p, q khác nhau, n > 255 và e nguyên tố cùng nhau với phi(n).")
+        return " ".join(str(pow(byte, e, modulus)) for byte in plaintext.encode("utf-8"))
 
 
-          def _aes_sub_bytes(state: list[int], inverse: bool = False) -> None:
-            box = _AES_INV_SBOX if inverse else _AES_SBOX
-            for index in range(16):
-              state[index] = box[state[index]]
+      def rsa_decrypt(ciphertext: str, p: int, q: int, e: int) -> str:
+        modulus = p * q
+        phi = (p - 1) * (q - 1)
+        if p < 2 or q < 2 or p == q or gcd(e, phi) != 1 or modulus <= 255:
+          raise ValueError("RSA cần p, q khác nhau, n > 255 và e nguyên tố cùng nhau với phi(n).")
+        private_exponent = pow(e, -1, phi)
+        try:
+          return bytes(pow(int(value), private_exponent, modulus) for value in ciphertext.split()).decode("utf-8")
+        except (ValueError, OverflowError, UnicodeDecodeError) as error:
+          raise ValueError("Bản mã RSA phải là các số nguyên hợp lệ với đúng khóa.") from error
 
 
-          def _aes_shift_rows(state: list[int], inverse: bool = False) -> None:
-            original = state[:]
-            for row in range(4):
-              for column in range(4):
-                source_column = (column - row if inverse else column + row) % 4
-                state[4 * column + row] = original[4 * source_column + row]
+      def hash_text(text: str, algorithm: str) -> str:
+        if algorithm == "md5":
+            return md5_text(text)
+        if algorithm == "sha256":
+            return sha256_text(text)
+        raise ValueError("Thuật toán băm không được hỗ trợ.")
 
-
-          def _aes_mix_columns(state: list[int], inverse: bool = False) -> None:
-            coefficients = (14, 11, 13, 9) if inverse else (2, 3, 1, 1)
-            for column in range(4):
-              offset = column * 4
-              values = state[offset:offset + 4]
-              state[offset] = (
-                  _aes_gf_mul(values[0], coefficients[0]) ^ _aes_gf_mul(values[1], coefficients[1])
-                  ^ _aes_gf_mul(values[2], coefficients[2]) ^ _aes_gf_mul(values[3], coefficients[3])
-                )
-              state[offset + 1] = (
-                _aes_gf_mul(values[0], coefficients[3]) ^ _aes_gf_mul(values[1], coefficients[0])
-                ^ _aes_gf_mul(values[2], coefficients[1]) ^ _aes_gf_mul(values[3], coefficients[2])
-              )
-              state[offset + 2] = (
-                _aes_gf_mul(values[0], coefficients[2]) ^ _aes_gf_mul(values[1], coefficients[3])
-                ^ _aes_gf_mul(values[2], coefficients[0]) ^ _aes_gf_mul(values[3], coefficients[1])
-              )
-              state[offset + 3] = (
-                _aes_gf_mul(values[0], coefficients[1]) ^ _aes_gf_mul(values[1], coefficients[2])
-                ^ _aes_gf_mul(values[2], coefficients[3]) ^ _aes_gf_mul(values[3], coefficients[0])
-              )
-
-
-          def _aes_transform_block(block: bytes, round_keys: list[list[int]], decrypt: bool) -> bytes:
-            state = list(block)
-            if decrypt:
-              _aes_add_round_key(state, round_keys[10])
-              for round_key in reversed(round_keys[1:10]):
-                _aes_shift_rows(state, inverse=True)
-                _aes_sub_bytes(state, inverse=True)
-                _aes_add_round_key(state, round_key)
-                _aes_mix_columns(state, inverse=True)
-              _aes_shift_rows(state, inverse=True)
-              _aes_sub_bytes(state, inverse=True)
-              _aes_add_round_key(state, round_keys[0])
-            else:
-              _aes_add_round_key(state, round_keys[0])
-              for round_key in round_keys[1:10]:
-                _aes_sub_bytes(state)
-                _aes_shift_rows(state)
-                _aes_mix_columns(state)
-                _aes_add_round_key(state, round_key)
-              _aes_sub_bytes(state)
-              _aes_shift_rows(state)
-              _aes_add_round_key(state, round_keys[10])
-            return bytes(state)
-
-
-          def aes_encrypt(plaintext: str, key: str) -> str:
-            round_keys = _aes_round_keys(_aes_key_bytes(key))
-            data = plaintext.encode("utf-8")
-            padding = 16 - len(data) % 16
-            data += bytes([padding] * padding)
-            return b"".join(
-              _aes_transform_block(data[index:index + 16], round_keys, False)
-              for index in range(0, len(data), 16)
-            ).hex().upper()
-
-
-          def aes_decrypt(ciphertext_hex: str, key: str) -> str:
-            try:
-              data = bytes.fromhex(ciphertext_hex.strip().replace(" ", ""))
-            except ValueError as error:
-              raise ValueError("Bản mã AES phải là chuỗi hex hợp lệ.") from error
-            if not data or len(data) % 16:
-              raise ValueError("Độ dài bản mã AES phải là bội số của 16 bytes.")
-            round_keys = _aes_round_keys(_aes_key_bytes(key))
-            plaintext = b"".join(
-              _aes_transform_block(data[index:index + 16], round_keys, True)
-              for index in range(0, len(data), 16)
-            )
-            padding = plaintext[-1]
-            if padding < 1 or padding > 16 or plaintext[-padding:] != bytes([padding] * padding):
-              raise ValueError("Padding AES không hợp lệ, có thể sai khóa.")
-            try:
-              return plaintext[:-padding].decode("utf-8")
-            except UnicodeDecodeError:
-              return "0x" + plaintext[:-padding].hex().upper()
-
-
-          def rsa_encrypt(plaintext: str, p: int, q: int, e: int) -> str:
-            modulus = p * q
-            phi = (p - 1) * (q - 1)
-            if p < 2 or q < 2 or p == q or gcd(e, phi) != 1 or modulus <= 255:
-              raise ValueError("RSA cần p, q khác nhau, n > 255 và e nguyên tố cùng nhau với phi(n).")
-            return " ".join(str(pow(byte, e, modulus)) for byte in plaintext.encode("utf-8"))
-
-
-          def rsa_decrypt(ciphertext: str, p: int, q: int, e: int) -> str:
-            modulus = p * q
-            phi = (p - 1) * (q - 1)
-            if p < 2 or q < 2 or p == q or gcd(e, phi) != 1 or modulus <= 255:
-              raise ValueError("RSA cần p, q khác nhau, n > 255 và e nguyên tố cùng nhau với phi(n).")
-            private_exponent = pow(e, -1, phi)
-            try:
-              return bytes(pow(int(value), private_exponent, modulus) for value in ciphertext.split()).decode("utf-8")
-            except (ValueError, OverflowError, UnicodeDecodeError) as error:
-              raise ValueError("Bản mã RSA phải là các số nguyên hợp lệ với đúng khóa.") from error
-
-
-          def hash_text(text: str, algorithm: str) -> str:
-            if algorithm == "md5":
-                return md5_text(text)
-            if algorithm == "sha256":
-                return sha256_text(text)
-            raise ValueError("Thuật toán băm không được hỗ trợ.")
-
-
-      def element(element_id: str):
+  def element(element_id: str):
           return document.getElementById(element_id)
 
 
