@@ -1,14 +1,45 @@
 """RSA không có padding, dùng số nguyên tố nhỏ: chỉ để học, không dùng bảo mật thực tế."""  # Bản RSA sách giáo khoa này không có lớp đệm an toàn như RSA-OAEP.
 
-from math import gcd, isqrt  # gcd tính ước chung lớn nhất; isqrt tính phần nguyên của căn bậc hai.
+def uoc_chung_lon_nhat(a: int, b: int) -> int:  # Thuật toán Euclid: thay cặp số bằng số chia và số dư.
+    a, b = abs(a), abs(b)  # Ước chung lớn nhất luôn không âm.
+    while b != 0:  # Tiếp tục khi phép chia vẫn còn số dư.
+        a, b = b, a % b  # gcd(a, b) bằng gcd(b, a chia dư b).
+    return a  # Khi số dư bằng 0, a là ước chung lớn nhất.
+
+
+def nghich_dao_modulo(so: int, modulo: int) -> int:  # Tìm x sao cho so * x chia modulo dư 1 bằng Euclid mở rộng.
+    du_cu, du = modulo, so % modulo  # Hai số dư đầu tiên của thuật toán Euclid.
+    he_so_cu, he_so = 0, 1  # Theo dõi hệ số của so trong mỗi số dư.
+    while du != 0:  # Lặp đến khi tìm được ước chung lớn nhất.
+        thuong = du_cu // du  # Lấy thương nguyên của hai số dư hiện tại.
+        du_cu, du = du, du_cu - thuong * du  # Tính số dư kế tiếp như Euclid thông thường.
+        he_so_cu, he_so = he_so, he_so_cu - thuong * he_so  # Cập nhật hệ số theo cùng phép trừ.
+    if du_cu != 1:  # Chỉ có nghịch đảo khi hai số nguyên tố cùng nhau.
+        raise ValueError("Không tồn tại nghịch đảo mô-đun.")  # Báo lỗi nếu không có nghịch đảo.
+    return he_so_cu % modulo  # Đưa nghịch đảo về miền từ 0 đến modulo - 1.
+
+
+def luy_thua_modulo(co_so: int, so_mu: int, modulo: int) -> int:  # Tự tính lũy thừa mô-đun bằng bình phương và nhân.
+    if so_mu < 0 or modulo <= 0:  # Thuật toán xử lý số mũ không âm và mô-đun dương.
+        raise ValueError("Số mũ phải không âm và mô-đun phải dương.")  # Tránh vòng lặp không kết thúc với số mũ âm.
+    ket_qua = 1 % modulo  # Giá trị ban đầu tương ứng lũy thừa bậc 0.
+    co_so = co_so % modulo  # Giảm cơ số trước để các số trung gian luôn nhỏ.
+    while so_mu > 0:  # Mỗi bước giảm số mũ còn khoảng một nửa.
+        if so_mu % 2 == 1:  # Số mũ lẻ còn thừa một lần nhân với cơ số hiện tại.
+            ket_qua = (ket_qua * co_so) % modulo  # Nhân cơ số vào kết quả và lấy dư ngay.
+        co_so = (co_so * co_so) % modulo  # Bình phương cơ số cho bước tiếp theo.
+        so_mu = so_mu // 2  # Chia nguyên số mũ cho 2, không cần toán tử dịch bit.
+    return ket_qua  # Trả kết quả mà không tạo số lũy thừa khổng lồ.
 
 
 def la_so_nguyen_to(so: int) -> bool:  # Trả về True nếu số đầu vào là số nguyên tố.
     if type(so) is not int or so < 2:  # Số nguyên tố phải là số nguyên và ít nhất bằng 2; loại cả True/False.
         return False  # Dừng kiểm tra nếu đầu vào không thể là số nguyên tố.
-    for uoc in range(2, isqrt(so) + 1):  # Chỉ cần thử các ước từ 2 đến căn bậc hai của số.
+    uoc = 2  # Bắt đầu thử ước nhỏ nhất lớn hơn 1.
+    while uoc * uoc <= so:  # Tự kiểm tra đến căn bậc hai, không gọi hàm thư viện.
         if so % uoc == 0:  # Phép chia dư bằng 0 nghĩa là đã tìm thấy một ước khác 1 và chính nó.
             return False  # Có ước khác thì số đang xét không phải số nguyên tố.
+        uoc += 1  # Thử ước nguyên tiếp theo.
     return True  # Không tìm được ước nào thì kết luận là số nguyên tố.
 
 
@@ -19,9 +50,9 @@ def tao_khoa(p: int, q: int, e: int = 17) -> tuple[tuple[int, int], tuple[int, i
     phi = (p - 1) * (q - 1)  # Với hai số nguyên tố khác nhau, hàm Euler của n bằng tích này.
     if n <= 255:  # Mỗi byte UTF-8 nằm từ 0 đến 255 nên n phải lớn hơn 255.
         raise ValueError("p * q phải lớn hơn 255 để mã hóa từng byte UTF-8.")  # Yêu cầu chọn p và q lớn hơn nếu tích quá nhỏ.
-    if type(e) is not int or not 1 < e < phi or gcd(e, phi) != 1:  # e phải nguyên tố cùng nhau với phi để có nghịch đảo.
+    if type(e) is not int or not 1 < e < phi or uoc_chung_lon_nhat(e, phi) != 1:  # e phải nguyên tố cùng nhau với phi để có nghịch đảo.
         raise ValueError("e phải là số nguyên, 1 < e < phi và gcd(e, phi) = 1.")  # Thông báo đầy đủ điều kiện chọn số mũ e.
-    d = pow(e, -1, phi)  # Tìm nghịch đảo mô-đun: e * d chia phi dư 1.
+    d = nghich_dao_modulo(e, phi)  # Tìm nghịch đảo mô-đun: e * d chia phi dư 1.
     return (e, n), (d, n)  # Trả lần lượt khóa công khai để mã hóa và khóa bí mật để giải mã.
 
 
@@ -42,7 +73,7 @@ def ma_hoa(van_ban: str, khoa_cong_khai: tuple[int, int]) -> list[int]:  # Nhậ
     e, n = khoa_cong_khai  # Lấy số mũ công khai e và mô-đun n.
     ban_ma = []  # Tạo danh sách rỗng để chứa kết quả mã hóa từng byte.
     for byte in van_ban.encode("utf-8"):  # Chuyển văn bản thành byte UTF-8 để hỗ trợ cả tiếng Việt.
-        ban_ma.append(pow(byte, e, n))  # Mã hóa theo c = m^e mod n và thêm kết quả vào danh sách.
+        ban_ma.append(luy_thua_modulo(byte, e, n))  # Mã hóa theo c = m^e mod n và thêm kết quả vào danh sách.
     return ban_ma  # Trả toàn bộ bản mã dạng danh sách số nguyên.
 
 
@@ -55,7 +86,7 @@ def giai_ma(ban_ma: list[int], khoa_bi_mat: tuple[int, int]) -> str:  # Nhận d
     for so in ban_ma:  # Xử lý lần lượt từng số nguyên trong bản mã.
         if type(so) is not int or not 0 <= so < n:  # Mỗi phần tử phải thuộc miền bản mã RSA từ 0 đến n - 1.
             raise ValueError("Mỗi số trong bản mã phải thỏa mãn 0 <= số < n.")  # Không âm thầm chấp nhận số ngoài miền hợp lệ.
-        byte = pow(so, d, n)  # Giải mã theo m = c^d mod n.
+        byte = luy_thua_modulo(so, d, n)  # Giải mã theo m = c^d mod n.
         if byte > 255:  # Một kết quả vượt 255 không thể biểu diễn bằng một byte.
             raise ValueError("Bản mã hoặc khóa không hợp lệ: kết quả không phải byte.")  # Báo lỗi thường gặp khi dùng sai khóa hoặc bản mã.
         du_lieu.append(byte)  # Ghép byte đã giải mã vào chuỗi dữ liệu nhị phân.
@@ -72,8 +103,8 @@ if __name__ == "__main__":  # Chỉ chạy ví dụ bên dưới khi thực thi 
     ban_ma = ma_hoa(van_ban, khoa_cong_khai)  # Mã hóa các byte của văn bản bằng khóa công khai.
     ban_giai_ma = giai_ma(ban_ma, khoa_bi_mat)  # Dùng khóa bí mật khôi phục văn bản từ danh sách bản mã.
     assert ban_giai_ma == van_ban  # Kiểm tra vòng mã hóa rồi giải mã phải giữ nguyên văn bản.
-    assert pow(65, e, p * q) == 2790  # Kiểm tra ví dụ số học chuẩn: 65^17 mod 3233 = 2790.
-    assert pow(2790, khoa_bi_mat[0], p * q) == 65  # Kiểm tra giải mã số 2790 bằng d = 2753 thu được 65.
+    assert luy_thua_modulo(65, e, p * q) == 2790  # Kiểm tra ví dụ số học chuẩn: 65^17 mod 3233 = 2790.
+    assert luy_thua_modulo(2790, khoa_bi_mat[0], p * q) == 65  # Kiểm tra giải mã số 2790 bằng d = 2753 thu được 65.
     print("p, q, e:", p, q, e)  # In các tham số ban đầu để dễ đối chiếu công thức.
     print("Khóa công khai (e, n):", khoa_cong_khai)  # Hiển thị cặp số dùng để mã hóa.
     print("Khóa bí mật (d, n):", khoa_bi_mat)  # Chỉ in khóa bí mật trong bài học; hệ thống thực tế phải giữ kín.

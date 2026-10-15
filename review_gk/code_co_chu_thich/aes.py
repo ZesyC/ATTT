@@ -24,100 +24,163 @@ for gia_tri in range(256):  # Xét mọi byte có thể xuất hiện.
     SBOX_NGUOC[SBOX[gia_tri]] = gia_tri  # Nếu S-box biến x thành y thì bảng ngược biến y về x.
 
 
-def _nhan_gf(a: int, b: int) -> int:  # Nhân hai byte trong trường hữu hạn GF(2^8) của AES.
-    ket_qua = 0  # Chưa cộng đa thức thành phần nào.
-    for _ in range(8):  # Byte b có đúng tám bit cần xét.
-        if b & 1:  # & 1 kiểm tra bit thấp nhất của b có bằng 1 không.
-            ket_qua ^= a  # ^ là XOR; phép cộng trong GF(2^8) dùng XOR thay cho cộng thường.
-        bit_cao = a & 0x80  # Ghi nhớ bit 7 trước khi dịch, để biết có phải rút gọn đa thức không.
-        a = (a << 1) & 0xFF  # << 1 nhân đa thức với x; & 0xFF chỉ giữ một byte.
-        if bit_cao:  # Nếu phép dịch vượt tám bit thì phải rút gọn theo đa thức AES.
-            a ^= 0x1B  # XOR phần thấp của đa thức x^8 + x^4 + x^3 + x + 1.
-        b >>= 1  # >> 1 bỏ bit đã xét, đưa bit tiếp theo xuống cuối.
-    return ket_qua  # Tích vẫn là một byte 0..255.
+def _byte_thanh_bits(gia_tri: int) -> list[int]:  # Đổi một byte thành mảng tám số 0 hoặc 1, không dùng dịch bit.
+    """Ví dụ 6 thành [0, 0, 0, 0, 0, 1, 1, 0], bit cao ở đầu."""  # Giữ bit cao ở đầu mảng để đọc giống cách viết nhị phân.
+    bits = [0] * 8  # Khởi tạo đủ tám vị trí, kể cả các số 0 ở đầu.
+    for vi_tri in range(7, -1, -1):  # Điền từ phải sang trái, bắt đầu ở bit thấp nhất.
+        bits[vi_tri] = gia_tri % 2  # Phần dư khi chia 2 là chữ số nhị phân cuối cùng.
+        gia_tri //= 2  # Chia nguyên cho 2 để bỏ chữ số vừa lấy.
+    return bits  # Trả mảng tám bit từ cao xuống thấp.
 
 
-def _tao_khoa_vong(khoa: bytes) -> list[list[int]]:  # Mở rộng khóa AES-128 thành 11 khóa vòng 16 byte.
-    cac_tu = []  # Mỗi từ gồm bốn byte; cần tổng cộng 44 từ.
-    for vi_tri in range(0, 16, 4):  # Chia khóa gốc thành bốn từ liên tiếp.
-        cac_tu.append(list(khoa[vi_tri:vi_tri + 4]))  # Chuyển mỗi từ sang list để tiện XOR từng byte.
-    rcon = 1  # Hằng số vòng đầu tiên trong phép mở rộng khóa.
-    while len(cac_tu) < 44:  # Sinh thêm từ cho đến khi đủ 11 khóa vòng.
-        tu = cac_tu[-1][:]  # Sao chép từ liền trước để không sửa từ đã lưu.
-        if len(cac_tu) % 4 == 0:  # Cứ mỗi bốn từ thì áp dụng biến đổi đặc biệt.
-            tu = tu[1:] + tu[:1]  # RotWord: dịch vòng trái một byte.
-            for chi_so in range(4):  # Thay thế cả bốn byte của từ.
-                tu[chi_so] = SBOX[tu[chi_so]]  # SubWord: tra S-box cho từng byte.
-            tu[0] ^= rcon  # XOR hằng số vòng vào byte đầu tiên.
-            rcon = _nhan_gf(rcon, 2)  # Tính hằng số cho vòng mở rộng kế tiếp.
+def _bits_thanh_byte(bits: list[int]) -> int:  # Đổi mảng bit từ cao xuống thấp về giá trị một byte.
+    gia_tri = 0  # Chưa đọc chữ số nhị phân nào nên bắt đầu bằng 0.
+    for bit in bits:  # Đọc lần lượt từ bit đầu tiên đến bit cuối cùng.
+        gia_tri = gia_tri * 2 + bit  # Nhân 2 để dành chỗ rồi cộng chữ số mới vào cuối.
+    return gia_tri  # Trả giá trị số đã ghép từ các bit.
+
+
+def _xor_byte(a: int, b: int) -> int:  # Tự tính XOR hai byte bằng mảng; hai bit khác nhau cho kết quả 1.
+    bits_a = _byte_thanh_bits(a)  # Tách byte thứ nhất thành tám bit.
+    bits_b = _byte_thanh_bits(b)  # Tách byte thứ hai thành tám bit cùng thứ tự.
+    ket_qua = []  # Tạo mảng để chứa từng bit kết quả.
+    for vi_tri in range(8):  # Xét từng cặp bit cùng vị trí.
+        ket_qua.append((bits_a[vi_tri] + bits_b[vi_tri]) % 2)  # Cộng modulo 2: 0+0 và 1+1 thành 0, 0+1 và 1+0 thành 1.
+    return _bits_thanh_byte(ket_qua)  # Ghép tám bit kết quả thành một byte.
+
+
+def _nhan_gf(a: int, b: int) -> int:  # Tự nhân hai byte theo trường GF(2^8), không dùng toán tử bit.
+    """Nhân đa thức nhị phân rồi chia dư cho x^8 + x^4 + x^3 + x + 1."""  # Mỗi byte biểu diễn một đa thức với hệ số chỉ nhận 0 hoặc 1.
+    da_thuc_a = _byte_thanh_bits(a)  # Hệ số của a theo thứ tự x^7, x^6, ..., x^0.
+    da_thuc_b = _byte_thanh_bits(b)  # Hệ số của b cũng theo thứ tự từ bậc cao xuống thấp.
+    tich = [0] * 15  # Hai đa thức bậc 7 nhân nhau cho tối đa 15 hệ số, từ bậc 14 đến 0.
+    for i in range(8):  # Chọn một hệ số của đa thức thứ nhất.
+        for j in range(8):  # Nhân với từng hệ số của đa thức thứ hai.
+            tich[i + j] = (tich[i + j] + da_thuc_a[i] * da_thuc_b[j]) % 2  # Nhân chập hệ số: bậc cộng với nhau, hệ số được cộng modulo 2.
+    da_thuc_aes = [1, 0, 0, 0, 1, 1, 0, 1, 1]  # Mảng hệ số của x^8 + x^4 + x^3 + x + 1, từ bậc 8 xuống bậc 0.
+    for vi_tri in range(7):  # Khử lần lượt các hạng từ bậc 14 xuống bậc 8 như phép chia đa thức.
+        if tich[vi_tri] == 1:  # Chỉ cần khử nếu hệ số đầu đoạn đang xét bằng 1.
+            for chi_so in range(9):  # Đặt đủ chín hệ số của đa thức chia vào đúng đoạn hiện tại.
+                tich[vi_tri + chi_so] = (tich[vi_tri + chi_so] + da_thuc_aes[chi_so]) % 2  # Cộng modulo 2 để triệt tiêu hệ số đầu và cập nhật các hệ số còn lại.
+    return _bits_thanh_byte(tich[7:])  # Phần dư chỉ còn tám hệ số bậc 7 đến 0, ghép lại thành một byte.
+
+
+def _tao_ma_tran(du_lieu: bytes) -> list[list[int]]:  # Đổi khối 16 byte thành ma trận 4 hàng × 4 cột.
+    """AES xếp 16 byte theo cột: cột đầu chứa byte 0, 1, 2, 3."""  # Chuẩn AES nạp dữ liệu lần lượt theo từng cột, không theo từng hàng.
+    ma_tran = []  # Chuẩn bị ma trận rỗng.
+    for hang in range(4):  # Tạo bốn hàng riêng biệt để tránh các hàng dùng chung một list.
+        ma_tran.append([0] * 4)  # Mỗi hàng có bốn ô ban đầu bằng 0.
+    for cot in range(4):  # Lần lượt nạp bốn cột dữ liệu.
+        for hang in range(4):  # Mỗi cột nhận bốn byte, từ hàng 0 đến hàng 3.
+            ma_tran[hang][cot] = du_lieu[4 * cot + hang]  # Byte thứ 4*cột+hàng được đưa vào đúng ô [hàng][cột].
+    return ma_tran  # Trả ma trận để các bước AES thao tác trực tiếp theo hàng và cột.
+
+
+def _tao_khoa_vong(khoa: bytes) -> list[list[list[int]]]:  # Mở rộng khóa AES-128 thành 11 ma trận khóa vòng 4×4.
+    cac_tu = []  # Danh sách chứa 44 từ, mỗi từ gồm bốn byte.
+    for vi_tri in range(0, 16, 4):  # Đọc khóa gốc theo từng nhóm bốn byte.
+        cac_tu.append(list(khoa[vi_tri:vi_tri + 4]))  # Lưu bốn nhóm đầu làm bốn từ ban đầu.
+    rcon = 1  # Hằng số mở rộng khóa đầu tiên bằng 1.
+    while len(cac_tu) < 44:  # Sinh từ mới cho đến khi đủ 44 từ.
+        tu = cac_tu[-1][:]  # Sao chép từ cuối để không sửa dữ liệu đã lưu.
+        if len(cac_tu) % 4 == 0:  # Mỗi khi bắt đầu nhóm bốn từ thì thực hiện biến đổi đặc biệt.
+            tu = tu[1:] + tu[:1]  # RotWord: đưa byte đầu sang cuối từ bằng cách cắt và nối mảng.
+            for chi_so in range(4):  # Duyệt cả bốn byte của từ vừa xoay.
+                tu[chi_so] = SBOX[tu[chi_so]]  # SubWord: thay từng byte bằng giá trị tra S-box chuẩn.
+            tu[0] = _xor_byte(tu[0], rcon)  # XOR byte đầu với hằng số vòng qua hàm xử lý mảng bit.
+            rcon = _nhan_gf(rcon, 2)  # Nhân hằng số với 2 trong GF(2^8) để chuẩn bị vòng sau.
         tu_moi = []  # Chuẩn bị từ mới gồm bốn byte.
-        for chi_so in range(4):  # XOR từ cách bốn vị trí với từ đã biến đổi.
-            tu_moi.append(cac_tu[-4][chi_so] ^ tu[chi_so])  # Mỗi byte mới là XOR của hai byte tương ứng.
-        cac_tu.append(tu_moi)  # Thêm từ mới để tiếp tục vòng lặp.
-    cac_khoa_vong = []  # Sẽ có khóa vòng 0, 1, ..., 10.
-    for vi_tri in range(0, 44, 4):  # Cứ bốn từ ghép thành một khóa 16 byte.
-        khoa_vong = []  # Khóa vòng hiện tại chưa có byte nào.
-        for tu in cac_tu[vi_tri:vi_tri + 4]:  # Đọc bốn từ theo đúng thứ tự đã sinh.
-            khoa_vong.extend(tu)  # Nối bốn byte của từ vào khóa vòng.
-        cac_khoa_vong.append(khoa_vong)  # Lưu khóa vòng đã đủ 16 byte.
-    return cac_khoa_vong  # Trả 11 khóa cho AddRoundKey.
+        for chi_so in range(4):  # Duyệt các vị trí tương ứng của hai từ.
+            tu_moi.append(_xor_byte(cac_tu[-4][chi_so], tu[chi_so]))  # XOR với từ đứng trước bốn vị trí để sinh từng byte mới.
+        cac_tu.append(tu_moi)  # Lưu từ mới để dùng cho các lần sinh tiếp theo.
+    cac_khoa_vong = []  # Danh sách kết quả sẽ chứa 11 ma trận khóa vòng.
+    for vi_tri in range(0, 44, 4):  # Ghép mỗi bốn từ liên tiếp thành một ma trận khóa.
+        khoa_vong = []  # Chuẩn bị ma trận khóa vòng hiện tại.
+        for hang in range(4):  # Xây dựng lần lượt bốn hàng của ma trận khóa.
+            hang_khoa = []  # Tạo mảng riêng chứa một hàng khóa.
+            for cot in range(4):  # Lấy một byte từ mỗi từ tương ứng với bốn cột.
+                hang_khoa.append(cac_tu[vi_tri + cot][hang])  # Từ thứ cột trở thành cột của ma trận khóa, byte thứ hàng trở thành hàng.
+            khoa_vong.append(hang_khoa)  # Thêm hàng đã đủ bốn ô vào khóa vòng.
+        cac_khoa_vong.append(khoa_vong)  # Lưu ma trận khóa vòng đã hoàn chỉnh.
+    return cac_khoa_vong  # Trả khóa vòng 0 đến 10, mỗi khóa có kích thước 4×4.
 
 
-def _them_khoa(trang_thai: list[int], khoa_vong: list[int]) -> None:  # AddRoundKey sửa trực tiếp trạng thái.
-    for chi_so in range(16):  # Trạng thái và khóa vòng đều có 16 byte.
-        trang_thai[chi_so] ^= khoa_vong[chi_so]  # XOR từng byte trạng thái với byte khóa cùng vị trí.
+def _them_khoa(trang_thai: list[list[int]], khoa_vong: list[list[int]]) -> None:  # AddRoundKey: kết hợp ma trận trạng thái và ma trận khóa cùng kích thước.
+    for hang in range(4):  # Duyệt từng hàng của trạng thái.
+        for cot in range(4):  # Duyệt từng cột trong hàng hiện tại.
+            trang_thai[hang][cot] = _xor_byte(trang_thai[hang][cot], khoa_vong[hang][cot])  # XOR hai byte ở cùng ô bằng hàm tự viết trên mảng bit.
 
 
-def _thay_byte(trang_thai: list[int], nguoc: bool = False) -> None:  # SubBytes hoặc InvSubBytes tùy chiều xử lý.
-    bang = SBOX_NGUOC if nguoc else SBOX  # Chọn bảng thay thế thuận hoặc bảng ngược.
-    for chi_so in range(16):  # Mỗi byte được thay thế độc lập.
-        trang_thai[chi_so] = bang[trang_thai[chi_so]]  # Dùng giá trị byte làm chỉ số tra bảng.
+def _thay_byte(trang_thai: list[list[int]], nguoc: bool = False) -> None:  # SubBytes hoặc InvSubBytes: thay từng ô của ma trận qua bảng chuẩn.
+    bang = SBOX_NGUOC if nguoc else SBOX  # Giải mã dùng S-box ngược, mã hóa dùng S-box thuận.
+    for hang in range(4):  # Duyệt bốn hàng của ma trận.
+        for cot in range(4):  # Duyệt bốn byte trong hàng.
+            trang_thai[hang][cot] = bang[trang_thai[hang][cot]]  # Lấy byte trong ô làm chỉ số tra bảng và ghi lại ô đó.
 
 
-def _dich_hang(trang_thai: list[int], nguoc: bool = False) -> None:  # ShiftRows dịch hàng trong ma trận 4x4.
-    ban_cu = trang_thai[:]  # Sao chép để các phép gán không làm mất byte chưa dùng.
-    for hang in range(4):  # Hàng 0 giữ nguyên; các hàng 1, 2, 3 dịch lần lượt 1, 2, 3 ô.
-        for cot in range(4):  # Xác định byte nguồn cho từng cột đích.
-            cot_nguon = (cot - hang if nguoc else cot + hang) % 4  # Mã hóa dịch trái, giải mã dịch phải theo vòng tròn.
-            trang_thai[4 * cot + hang] = ban_cu[4 * cot_nguon + hang]  # AES lưu theo cột: chỉ số = 4*cột + hàng.
+def _dich_hang(trang_thai: list[list[int]], nguoc: bool = False) -> None:  # ShiftRows: dịch vòng trên từng mảng hàng của trạng thái 4×4.
+    for hang in range(1, 4):  # Hàng 0 giữ nguyên; hàng 1, 2, 3 dịch lần lượt 1, 2, 3 vị trí.
+        dong = trang_thai[hang]  # Lấy mảng byte của hàng đang xử lý.
+        if nguoc:  # Nhánh giải mã dịch sang phải để đảo phép dịch trái.
+            trang_thai[hang] = dong[-hang:] + dong[:-hang]  # Cắt các byte cuối đưa lên đầu, nối với phần còn lại.
+        else:  # Nhánh mã hóa dịch sang trái.
+            trang_thai[hang] = dong[hang:] + dong[:hang]  # Cắt các byte đầu đưa xuống cuối, nối với phần còn lại.
 
 
-def _tron_cot(trang_thai: list[int], nguoc: bool = False) -> None:  # MixColumns nhân mỗi cột với ma trận cố định trên GF(2^8).
-    he_so = (14, 11, 13, 9) if nguoc else (2, 3, 1, 1)  # Hàng đầu của ma trận nghịch đảo hoặc ma trận thuận.
-    for cot in range(4):  # Xử lý riêng từng cột của trạng thái AES.
-        vi_tri = 4 * cot  # Mỗi cột chiếm bốn byte liên tiếp trong list.
-        gia_tri = trang_thai[vi_tri:vi_tri + 4]  # Giữ bản cũ của cột để tính đủ bốn byte mới.
-        for hang in range(4):  # Mỗi hàng của ma trận nhân cho ra một byte mới.
-            ket_qua = 0  # Khởi tạo tổng GF bằng 0.
-            for chi_so in range(4):  # Cộng bốn tích bằng XOR.
-                he_so_hien_tai = he_so[(chi_so - hang) % 4]  # Các hàng sau của ma trận là dịch vòng hàng hệ số đầu.
-                ket_qua ^= _nhan_gf(gia_tri[chi_so], he_so_hien_tai)  # Nhân byte trong GF rồi XOR vào tổng.
-            trang_thai[vi_tri + hang] = ket_qua  # Ghi byte mới vào đúng hàng của cột.
+def _tron_cot(trang_thai: list[list[int]], nguoc: bool = False) -> None:  # MixColumns: nhân ma trận hệ số 4×4 với từng cột trạng thái trong GF(2^8).
+    if nguoc:  # Giải mã chọn ma trận nghịch đảo của MixColumns.
+        ma_tran_he_so = [  # Khai báo trực tiếp ma trận nghịch đảo để dễ đối chiếu công thức.
+            [14, 11, 13, 9],  # Hàng thứ nhất của ma trận nghịch đảo.
+            [9, 14, 11, 13],  # Hàng thứ hai của ma trận nghịch đảo.
+            [13, 9, 14, 11],  # Hàng thứ ba của ma trận nghịch đảo.
+            [11, 13, 9, 14],  # Hàng thứ tư của ma trận nghịch đảo.
+        ]  # Kết thúc ma trận nghịch đảo.
+    else:  # Mã hóa chọn ma trận MixColumns thuận.
+        ma_tran_he_so = [  # Khai báo đủ 16 hệ số của ma trận thuận.
+            [2, 3, 1, 1],  # Hàng thứ nhất của ma trận thuận.
+            [1, 2, 3, 1],  # Hàng thứ hai của ma trận thuận.
+            [1, 1, 2, 3],  # Hàng thứ ba của ma trận thuận.
+            [3, 1, 1, 2],  # Hàng thứ tư của ma trận thuận.
+        ]  # Kết thúc ma trận thuận.
+    for cot in range(4):  # Xử lý độc lập từng cột trạng thái.
+        cot_cu = []  # Chuẩn bị bản sao cột để kết quả mới không ghi đè dữ liệu còn cần.
+        for hang in range(4):  # Đọc lần lượt bốn byte trong cột hiện tại.
+            cot_cu.append(trang_thai[hang][cot])  # Lưu byte cũ ở hàng tương ứng.
+        for hang in range(4):  # Tính lần lượt bốn ô mới trong cột.
+            ket_qua = 0  # Khởi tạo tổng GF bằng byte 0.
+            for chi_so in range(4):  # Nhân hàng của ma trận hệ số với cột trạng thái.
+                tich = _nhan_gf(ma_tran_he_so[hang][chi_so], cot_cu[chi_so])  # Mỗi tích dùng phép nhân đa thức rồi rút gọn bằng hàm tự viết.
+                ket_qua = _xor_byte(ket_qua, tich)  # Cộng các tích trong GF bằng XOR trên mảng bit.
+            trang_thai[hang][cot] = ket_qua  # Ghi byte kết quả về đúng ô [hàng][cột].
 
 
-def _bien_doi_khoi(khoi: bytes, cac_khoa_vong: list[list[int]], giai: bool) -> bytes:  # Lõi xử lý một khối AES-128.
-    trang_thai = list(khoi)  # 16 byte xếp theo cột: byte 0..3 là cột đầu của ma trận 4x4.
-    if giai:  # Nhánh giải mã đảo các bước và đảo thứ tự khóa vòng.
-        _them_khoa(trang_thai, cac_khoa_vong[10])  # Bỏ khóa đã được thêm ở vòng mã hóa cuối.
-        for vong in range(9, 0, -1):  # Duyệt vòng 9 đến 1 theo thứ tự giảm dần.
-            _dich_hang(trang_thai, nguoc=True)  # Đảo phép ShiftRows của vòng mã hóa tương ứng.
-            _thay_byte(trang_thai, nguoc=True)  # Đảo phép SubBytes bằng S-box ngược.
-            _them_khoa(trang_thai, cac_khoa_vong[vong])  # XOR lại cùng khóa để loại khóa vòng.
+def _bien_doi_khoi(khoi: bytes, cac_khoa_vong: list[list[list[int]]], giai: bool) -> bytes:  # Lõi AES xử lý khối 16 byte với các khóa vòng là ma trận 4×4.
+    trang_thai = _tao_ma_tran(khoi)  # Nạp khối vào ma trận trạng thái theo thứ tự cột của chuẩn AES.
+    if giai:  # Nhánh giải mã đảo thứ tự khóa và các phép biến đổi.
+        _them_khoa(trang_thai, cac_khoa_vong[10])  # Bỏ khóa vòng cuối đã thêm khi mã hóa.
+        for vong in range(9, 0, -1):  # Giải mã lần lượt từ vòng 9 về vòng 1.
+            _dich_hang(trang_thai, nguoc=True)  # Dịch các hàng sang phải để đảo ShiftRows.
+            _thay_byte(trang_thai, nguoc=True)  # Thay các byte qua S-box ngược để đảo SubBytes.
+            _them_khoa(trang_thai, cac_khoa_vong[vong])  # XOR khóa vòng hiện tại để bỏ phần khóa.
             _tron_cot(trang_thai, nguoc=True)  # Nhân ma trận nghịch đảo để đảo MixColumns.
-        _dich_hang(trang_thai, nguoc=True)  # Đảo ShiftRows của vòng đầu còn lại.
-        _thay_byte(trang_thai, nguoc=True)  # Đảo SubBytes của vòng đầu còn lại.
-        _them_khoa(trang_thai, cac_khoa_vong[0])  # Bỏ khóa ban đầu để thu lại bản rõ.
-    else:  # Nhánh mã hóa AES-128 có 10 vòng.
-        _them_khoa(trang_thai, cac_khoa_vong[0])  # Thêm khóa gốc trước vòng mã hóa thứ nhất.
-        for vong in range(1, 10):  # Chín vòng đầu có đủ bốn bước biến đổi.
-            _thay_byte(trang_thai)  # SubBytes thay từng byte qua S-box.
-            _dich_hang(trang_thai)  # ShiftRows dịch vòng các hàng.
-            _tron_cot(trang_thai)  # MixColumns trộn các byte trong từng cột.
-            _them_khoa(trang_thai, cac_khoa_vong[vong])  # AddRoundKey trộn khóa của vòng hiện tại.
-        _thay_byte(trang_thai)  # Bắt đầu vòng thứ 10 với SubBytes.
-        _dich_hang(trang_thai)  # ShiftRows của vòng thứ 10; vòng này không có MixColumns.
-        _them_khoa(trang_thai, cac_khoa_vong[10])  # Thêm khóa vòng cuối để hoàn tất mã hóa.
-    return bytes(trang_thai)  # Trả khối kết quả đúng 16 byte.
+        _dich_hang(trang_thai, nguoc=True)  # Đảo ShiftRows còn lại của bước đầu.
+        _thay_byte(trang_thai, nguoc=True)  # Đảo SubBytes còn lại của bước đầu.
+        _them_khoa(trang_thai, cac_khoa_vong[0])  # Bỏ khóa gốc để nhận ma trận bản rõ.
+    else:  # Nhánh mã hóa AES-128 gồm 10 vòng.
+        _them_khoa(trang_thai, cac_khoa_vong[0])  # Kết hợp khóa gốc với trạng thái trước vòng 1.
+        for vong in range(1, 10):  # Chín vòng đầu có đủ SubBytes, ShiftRows, MixColumns và AddRoundKey.
+            _thay_byte(trang_thai)  # Thay từng byte của trạng thái qua S-box thuận.
+            _dich_hang(trang_thai)  # Dịch vòng trái các hàng bằng thao tác cắt và nối mảng.
+            _tron_cot(trang_thai)  # Trộn mỗi cột bằng phép nhân ma trận trong GF(2^8).
+            _them_khoa(trang_thai, cac_khoa_vong[vong])  # Kết hợp ma trận khóa của vòng hiện tại.
+        _thay_byte(trang_thai)  # Vòng 10 bắt đầu bằng bước thay byte.
+        _dich_hang(trang_thai)  # Dịch hàng ở vòng 10; vòng cuối không có MixColumns.
+        _them_khoa(trang_thai, cac_khoa_vong[10])  # Kết hợp khóa vòng 10 để hoàn thành mã hóa.
+    ket_qua = []  # Chuẩn bị danh sách 16 byte đầu ra.
+    for cot in range(4):  # Đọc ma trận theo từng cột, giống thứ tự nạp khối đầu vào.
+        for hang in range(4):  # Đọc từ trên xuống dưới trong cột hiện tại.
+            ket_qua.append(trang_thai[hang][cot])  # Thêm byte trong ô vào cuối kết quả.
+    return bytes(ket_qua)  # Đóng gói danh sách thành khối bytes có độ dài 16.
 
 
 def _kiem_tra_khoa(khoa: bytes) -> None:  # Phiên bản này chỉ triển khai AES-128.

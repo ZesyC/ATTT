@@ -119,50 +119,90 @@ _DES_S = [
 ]
 
 
-def _hoan_vi(khoi: int, bang: list[int], so_bit: int) -> int:
+def _so_thanh_bit(so: int, do_dai: int) -> list[int]:
+    """Viết số thành danh sách bit, bit cao nhất đứng đầu."""
+    cac_bit = [0] * do_dai
+    for vi_tri in range(do_dai - 1, -1, -1):
+        cac_bit[vi_tri] = so % 2
+        so = so // 2
+    return cac_bit
+
+
+def _bit_thanh_so(cac_bit: list[int]) -> int:
     ket_qua = 0
-    for vi_tri in bang:
-        bit = (khoi >> (so_bit - vi_tri)) & 1
-        ket_qua = (ket_qua << 1) | bit
+    for bit in cac_bit:
+        ket_qua = ket_qua * 2 + bit
     return ket_qua
 
 
-def _tao_khoa_con(khoa: bytes) -> list[int]:
-    khoa_so = int.from_bytes(khoa, "big")
-    khoa_56_bit = _hoan_vi(khoa_so, _DES_PC1, 64)
-    trai = khoa_56_bit >> 28
-    phai = khoa_56_bit & 0x0FFFFFFF
+def _byte_thanh_bit(du_lieu: bytes) -> list[int]:
+    cac_bit = []
+    for byte in du_lieu:
+        cac_bit.extend(_so_thanh_bit(byte, 8))
+    return cac_bit
+
+
+def _bit_thanh_byte(cac_bit: list[int]) -> bytes:
+    cac_byte = []
+    for vi_tri in range(0, len(cac_bit), 8):
+        cac_byte.append(_bit_thanh_so(cac_bit[vi_tri:vi_tri + 8]))
+    return bytes(cac_byte)
+
+
+def _xor(trai: list[int], phai: list[int]) -> list[int]:
+    """Hai bit khác nhau cho 1, giống nhau cho 0."""
+    ket_qua = []
+    for vi_tri in range(len(trai)):
+        ket_qua.append((trai[vi_tri] + phai[vi_tri]) % 2)
+    return ket_qua
+
+
+def _hoan_vi(khoi: list[int], bang: list[int]) -> list[int]:
+    ket_qua = []
+    for vi_tri in bang:
+        ket_qua.append(khoi[vi_tri - 1])
+    return ket_qua
+
+
+def _tao_khoa_con(khoa: bytes) -> list[list[int]]:
+    khoa_64_bit = _byte_thanh_bit(khoa)
+    khoa_56_bit = _hoan_vi(khoa_64_bit, _DES_PC1)
+    trai = khoa_56_bit[:28]
+    phai = khoa_56_bit[28:]
     cac_khoa_con = []
     for so_dich in _DES_SHIFTS:
-        trai = ((trai << so_dich) | (trai >> (28 - so_dich))) & 0x0FFFFFFF
-        phai = ((phai << so_dich) | (phai >> (28 - so_dich))) & 0x0FFFFFFF
-        ghep = (trai << 28) | phai
-        cac_khoa_con.append(_hoan_vi(ghep, _DES_PC2, 56))
+        trai = trai[so_dich:] + trai[:so_dich]
+        phai = phai[so_dich:] + phai[:so_dich]
+        ghep = trai + phai
+        cac_khoa_con.append(_hoan_vi(ghep, _DES_PC2))
     return cac_khoa_con
 
 
-def _ham_f(phai: int, khoa_con: int) -> int:
-    mo_rong = _hoan_vi(phai, _DES_E, 32)
-    tron_khoa = mo_rong ^ khoa_con
-    thay_the = 0
+def _ham_f(phai: list[int], khoa_con: list[int]) -> list[int]:
+    mo_rong = _hoan_vi(phai, _DES_E)
+    tron_khoa = _xor(mo_rong, khoa_con)
+    thay_the = []
     for chi_so in range(8):
-        nhom = (tron_khoa >> (42 - 6 * chi_so)) & 0x3F
-        hang = ((nhom & 0x20) >> 4) | (nhom & 1)
-        cot = (nhom >> 1) & 0x0F
-        thay_the = (thay_the << 4) | _DES_S[chi_so][hang][cot]
-    return _hoan_vi(thay_the, _DES_P, 32)
+        nhom = tron_khoa[6 * chi_so:6 * chi_so + 6]
+        hang = _bit_thanh_so([nhom[0], nhom[5]])
+        cot = _bit_thanh_so(nhom[1:5])
+        gia_tri = _DES_S[chi_so][hang][cot]
+        thay_the.extend(_so_thanh_bit(gia_tri, 4))
+    return _hoan_vi(thay_the, _DES_P)
 
 
-def _bien_doi_khoi(khoi: bytes, cac_khoa_con: list[int]) -> bytes:
-    khoi_so = int.from_bytes(khoi, "big")
-    ban_dau = _hoan_vi(khoi_so, _DES_IP, 64)
-    trai = ban_dau >> 32
-    phai = ban_dau & 0xFFFFFFFF
+def _bien_doi_khoi(khoi: bytes, cac_khoa_con: list[list[int]]) -> bytes:
+    cac_bit = _byte_thanh_bit(khoi)
+    ban_dau = _hoan_vi(cac_bit, _DES_IP)
+    trai = ban_dau[:32]
+    phai = ban_dau[32:]
     for khoa_con in cac_khoa_con:
-        trai, phai = phai, trai ^ _ham_f(phai, khoa_con)
-    ghep = (phai << 32) | trai
-    ket_qua = _hoan_vi(ghep, _DES_IP_INV, 64)
-    return ket_qua.to_bytes(8, "big")
+        trai_moi = phai
+        phai_moi = _xor(trai, _ham_f(phai, khoa_con))
+        trai, phai = trai_moi, phai_moi
+    ghep = phai + trai
+    ket_qua = _hoan_vi(ghep, _DES_IP_INV)
+    return _bit_thanh_byte(ket_qua)
 
 
 def _kiem_tra_khoa(khoa: bytes) -> None:

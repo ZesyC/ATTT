@@ -24,20 +24,59 @@ for gia_tri in range(256):
     SBOX_NGUOC[SBOX[gia_tri]] = gia_tri
 
 
+def _byte_thanh_bits(gia_tri: int) -> list[int]:
+    """Ví dụ 6 thành [0, 0, 0, 0, 0, 1, 1, 0], bit cao ở đầu."""
+    bits = [0] * 8
+    for vi_tri in range(7, -1, -1):
+        bits[vi_tri] = gia_tri % 2
+        gia_tri //= 2
+    return bits
+
+
+def _bits_thanh_byte(bits: list[int]) -> int:
+    gia_tri = 0
+    for bit in bits:
+        gia_tri = gia_tri * 2 + bit
+    return gia_tri
+
+
+def _xor_byte(a: int, b: int) -> int:
+    bits_a = _byte_thanh_bits(a)
+    bits_b = _byte_thanh_bits(b)
+    ket_qua = []
+    for vi_tri in range(8):
+        ket_qua.append((bits_a[vi_tri] + bits_b[vi_tri]) % 2)
+    return _bits_thanh_byte(ket_qua)
+
+
 def _nhan_gf(a: int, b: int) -> int:
-    ket_qua = 0
-    for _ in range(8):
-        if b & 1:
-            ket_qua ^= a
-        bit_cao = a & 0x80
-        a = (a << 1) & 0xFF
-        if bit_cao:
-            a ^= 0x1B
-        b >>= 1
-    return ket_qua
+    """Nhân đa thức nhị phân rồi chia dư cho x^8 + x^4 + x^3 + x + 1."""
+    da_thuc_a = _byte_thanh_bits(a)
+    da_thuc_b = _byte_thanh_bits(b)
+    tich = [0] * 15  # Hệ số theo thứ tự x^14, x^13, ..., x^0.
+    for i in range(8):
+        for j in range(8):
+            tich[i + j] = (tich[i + j] + da_thuc_a[i] * da_thuc_b[j]) % 2
+    da_thuc_aes = [1, 0, 0, 0, 1, 1, 0, 1, 1]
+    for vi_tri in range(7):  # Khử các hạng từ bậc 14 xuống bậc 8.
+        if tich[vi_tri] == 1:
+            for chi_so in range(9):
+                tich[vi_tri + chi_so] = (tich[vi_tri + chi_so] + da_thuc_aes[chi_so]) % 2
+    return _bits_thanh_byte(tich[7:])
 
 
-def _tao_khoa_vong(khoa: bytes) -> list[list[int]]:
+def _tao_ma_tran(du_lieu: bytes) -> list[list[int]]:
+    """AES xếp 16 byte theo cột: cột đầu chứa byte 0, 1, 2, 3."""
+    ma_tran = []
+    for hang in range(4):
+        ma_tran.append([0] * 4)
+    for cot in range(4):
+        for hang in range(4):
+            ma_tran[hang][cot] = du_lieu[4 * cot + hang]
+    return ma_tran
+
+
+def _tao_khoa_vong(khoa: bytes) -> list[list[list[int]]]:
     cac_tu = []
     for vi_tri in range(0, 16, 4):
         cac_tu.append(list(khoa[vi_tri:vi_tri + 4]))
@@ -48,55 +87,75 @@ def _tao_khoa_vong(khoa: bytes) -> list[list[int]]:
             tu = tu[1:] + tu[:1]
             for chi_so in range(4):
                 tu[chi_so] = SBOX[tu[chi_so]]
-            tu[0] ^= rcon
+            tu[0] = _xor_byte(tu[0], rcon)
             rcon = _nhan_gf(rcon, 2)
         tu_moi = []
         for chi_so in range(4):
-            tu_moi.append(cac_tu[-4][chi_so] ^ tu[chi_so])
+            tu_moi.append(_xor_byte(cac_tu[-4][chi_so], tu[chi_so]))
         cac_tu.append(tu_moi)
     cac_khoa_vong = []
     for vi_tri in range(0, 44, 4):
         khoa_vong = []
-        for tu in cac_tu[vi_tri:vi_tri + 4]:
-            khoa_vong.extend(tu)
+        for hang in range(4):
+            hang_khoa = []
+            for cot in range(4):
+                hang_khoa.append(cac_tu[vi_tri + cot][hang])
+            khoa_vong.append(hang_khoa)
         cac_khoa_vong.append(khoa_vong)
     return cac_khoa_vong
 
 
-def _them_khoa(trang_thai: list[int], khoa_vong: list[int]) -> None:
-    for chi_so in range(16):
-        trang_thai[chi_so] ^= khoa_vong[chi_so]
-
-
-def _thay_byte(trang_thai: list[int], nguoc: bool = False) -> None:
-    bang = SBOX_NGUOC if nguoc else SBOX
-    for chi_so in range(16):
-        trang_thai[chi_so] = bang[trang_thai[chi_so]]
-
-
-def _dich_hang(trang_thai: list[int], nguoc: bool = False) -> None:
-    ban_cu = trang_thai[:]
+def _them_khoa(trang_thai: list[list[int]], khoa_vong: list[list[int]]) -> None:
     for hang in range(4):
         for cot in range(4):
-            cot_nguon = (cot - hang if nguoc else cot + hang) % 4
-            trang_thai[4 * cot + hang] = ban_cu[4 * cot_nguon + hang]
+            trang_thai[hang][cot] = _xor_byte(trang_thai[hang][cot], khoa_vong[hang][cot])
 
 
-def _tron_cot(trang_thai: list[int], nguoc: bool = False) -> None:
-    he_so = (14, 11, 13, 9) if nguoc else (2, 3, 1, 1)
+def _thay_byte(trang_thai: list[list[int]], nguoc: bool = False) -> None:
+    bang = SBOX_NGUOC if nguoc else SBOX
+    for hang in range(4):
+        for cot in range(4):
+            trang_thai[hang][cot] = bang[trang_thai[hang][cot]]
+
+
+def _dich_hang(trang_thai: list[list[int]], nguoc: bool = False) -> None:
+    for hang in range(1, 4):
+        dong = trang_thai[hang]
+        if nguoc:
+            trang_thai[hang] = dong[-hang:] + dong[:-hang]
+        else:
+            trang_thai[hang] = dong[hang:] + dong[:hang]
+
+
+def _tron_cot(trang_thai: list[list[int]], nguoc: bool = False) -> None:
+    if nguoc:
+        ma_tran_he_so = [
+            [14, 11, 13, 9],
+            [9, 14, 11, 13],
+            [13, 9, 14, 11],
+            [11, 13, 9, 14],
+        ]
+    else:
+        ma_tran_he_so = [
+            [2, 3, 1, 1],
+            [1, 2, 3, 1],
+            [1, 1, 2, 3],
+            [3, 1, 1, 2],
+        ]
     for cot in range(4):
-        vi_tri = 4 * cot
-        gia_tri = trang_thai[vi_tri:vi_tri + 4]
+        cot_cu = []
+        for hang in range(4):
+            cot_cu.append(trang_thai[hang][cot])
         for hang in range(4):
             ket_qua = 0
             for chi_so in range(4):
-                he_so_hien_tai = he_so[(chi_so - hang) % 4]
-                ket_qua ^= _nhan_gf(gia_tri[chi_so], he_so_hien_tai)
-            trang_thai[vi_tri + hang] = ket_qua
+                tich = _nhan_gf(ma_tran_he_so[hang][chi_so], cot_cu[chi_so])
+                ket_qua = _xor_byte(ket_qua, tich)
+            trang_thai[hang][cot] = ket_qua
 
 
-def _bien_doi_khoi(khoi: bytes, cac_khoa_vong: list[list[int]], giai: bool) -> bytes:
-    trang_thai = list(khoi)
+def _bien_doi_khoi(khoi: bytes, cac_khoa_vong: list[list[list[int]]], giai: bool) -> bytes:
+    trang_thai = _tao_ma_tran(khoi)
     if giai:
         _them_khoa(trang_thai, cac_khoa_vong[10])
         for vong in range(9, 0, -1):
@@ -117,7 +176,11 @@ def _bien_doi_khoi(khoi: bytes, cac_khoa_vong: list[list[int]], giai: bool) -> b
         _thay_byte(trang_thai)
         _dich_hang(trang_thai)
         _them_khoa(trang_thai, cac_khoa_vong[10])
-    return bytes(trang_thai)
+    ket_qua = []
+    for cot in range(4):
+        for hang in range(4):
+            ket_qua.append(trang_thai[hang][cot])
+    return bytes(ket_qua)
 
 
 def _kiem_tra_khoa(khoa: bytes) -> None:

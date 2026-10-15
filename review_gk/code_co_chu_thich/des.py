@@ -119,50 +119,91 @@ _DES_S = [  # Tám S-box; mỗi S-box biến nhóm 6 bit thành 4 bit.
 ]  # Kết thúc tám S-box chuẩn của DES.
 
 
-def _hoan_vi(khoi: int, bang: list[int], so_bit: int) -> int:  # Đọc bit theo bảng đánh số từ 1 ở phía trái.
-    ket_qua = 0  # Chưa có bit nào trong kết quả hoán vị.
-    for vi_tri in bang:  # Lần lượt lấy từng vị trí được bảng quy định.
-        bit = (khoi >> (so_bit - vi_tri)) & 1  # >> đưa bit cần lấy về cuối; & 1 giữ riêng bit đó.
-        ket_qua = (ket_qua << 1) | bit  # << 1 chừa một chỗ bên phải; | ghép bit mới vào.
-    return ket_qua  # Trả lại số nguyên chứa các bit đã sắp xếp.
+def _so_thanh_bit(so: int, do_dai: int) -> list[int]:  # Hàm tự viết, xử lý bằng danh sách và phép toán số học.
+    """Viết số thành danh sách bit, bit cao nhất đứng đầu."""
+    cac_bit = [0] * do_dai  # Tạo đủ các ô để giữ cả các chữ số 0 ở đầu.
+    for vi_tri in range(do_dai - 1, -1, -1):  # Đi từ cuối mảng về đầu để điền chữ số nhị phân.
+        cac_bit[vi_tri] = so % 2  # Phần dư chia 2 là chữ số cuối.
+        so = so // 2  # Bỏ chữ số vừa lấy bằng phép chia nguyên.
+    return cac_bit  # Trả kết quả đã tạo.
 
 
-def _tao_khoa_con(khoa: bytes) -> list[int]:  # Sinh 16 khóa con, mỗi khóa dài 48 bit.
-    khoa_so = int.from_bytes(khoa, "big")  # Đổi 8 byte thành số nguyên, byte đầu nằm bên trái.
-    khoa_56_bit = _hoan_vi(khoa_so, _DES_PC1, 64)  # PC-1 loại bit chẵn lẻ và hoán vị khóa.
-    trai = khoa_56_bit >> 28  # Lấy nửa trái gồm 28 bit cao.
-    phai = khoa_56_bit & 0x0FFFFFFF  # & mặt nạ giữ 28 bit thấp cho nửa phải.
-    cac_khoa_con = []  # Lưu khóa con theo thứ tự dùng khi mã hóa.
-    for so_dich in _DES_SHIFTS:  # Mỗi vòng dịch khóa một hoặc hai bit theo lịch chuẩn.
-        trai = ((trai << so_dich) | (trai >> (28 - so_dich))) & 0x0FFFFFFF  # Dịch vòng trái rồi giữ đúng 28 bit.
-        phai = ((phai << so_dich) | (phai >> (28 - so_dich))) & 0x0FFFFFFF  # Dịch vòng độc lập cho nửa phải.
-        ghep = (trai << 28) | phai  # Nối nửa trái với nửa phải thành 56 bit.
-        cac_khoa_con.append(_hoan_vi(ghep, _DES_PC2, 56))  # PC-2 chọn 48 bit làm khóa của vòng này.
-    return cac_khoa_con  # Trả danh sách 16 khóa con.
+def _bit_thanh_so(cac_bit: list[int]) -> int:  # Hàm tự viết, xử lý bằng danh sách và phép toán số học.
+    ket_qua = 0  # Bắt đầu đọc số từ giá trị 0.
+    for bit in cac_bit:  # Duyệt lần lượt các phần tử cần xử lý.
+        ket_qua = ket_qua * 2 + bit  # Đọc thêm một chữ số nhị phân ở bên phải.
+    return ket_qua  # Trả kết quả đã tạo.
 
 
-def _ham_f(phai: int, khoa_con: int) -> int:  # Hàm F biến nửa phải 32 bit bằng khóa con 48 bit.
-    mo_rong = _hoan_vi(phai, _DES_E, 32)  # Bảng E lặp lại một số bit để tạo 48 bit.
-    tron_khoa = mo_rong ^ khoa_con  # ^ là XOR: hai bit khác nhau cho 1, giống nhau cho 0.
-    thay_the = 0  # Ghép dần tám đầu ra S-box, mỗi đầu ra dài 4 bit.
-    for chi_so in range(8):  # Một S-box xử lý một nhóm 6 bit.
-        nhom = (tron_khoa >> (42 - 6 * chi_so)) & 0x3F  # Dịch đến nhóm cần lấy, & 0x3F giữ 6 bit.
-        hang = ((nhom & 0x20) >> 4) | (nhom & 1)  # Bit đầu và bit cuối của nhóm chọn hàng 0..3.
-        cot = (nhom >> 1) & 0x0F  # Bốn bit giữa chọn cột 0..15.
-        thay_the = (thay_the << 4) | _DES_S[chi_so][hang][cot]  # Nối giá trị 4 bit tra được vào kết quả.
-    return _hoan_vi(thay_the, _DES_P, 32)  # Bảng P hoán vị đầu ra thành kết quả F 32 bit.
+def _byte_thanh_bit(du_lieu: bytes) -> list[int]:  # Hàm tự viết, xử lý bằng danh sách và phép toán số học.
+    cac_bit = []  # Khởi tạo danh sách kết quả rỗng.
+    for byte in du_lieu:  # Duyệt lần lượt các phần tử cần xử lý.
+        cac_bit.extend(_so_thanh_bit(byte, 8))  # Mỗi byte trở thành 8 ô 0/1 rồi nối vào mảng.
+    return cac_bit  # Trả kết quả đã tạo.
 
 
-def _bien_doi_khoi(khoi: bytes, cac_khoa_con: list[int]) -> bytes:  # Cấu trúc Feistel dùng chung cho mã hóa và giải mã.
-    khoi_so = int.from_bytes(khoi, "big")  # Biểu diễn khối 8 byte bằng số nguyên 64 bit.
-    ban_dau = _hoan_vi(khoi_so, _DES_IP, 64)  # Thực hiện hoán vị đầu IP.
-    trai = ban_dau >> 32  # Lấy 32 bit cao làm nửa trái.
-    phai = ban_dau & 0xFFFFFFFF  # Lấy 32 bit thấp làm nửa phải.
-    for khoa_con in cac_khoa_con:  # DES chạy 16 vòng với thứ tự khóa được truyền vào.
-        trai, phai = phai, trai ^ _ham_f(phai, khoa_con)  # L mới = R cũ; R mới = L cũ XOR F(R cũ, khóa).
-    ghep = (phai << 32) | trai  # Sau vòng cuối, ghép R16 trước L16 theo quy định DES.
-    ket_qua = _hoan_vi(ghep, _DES_IP_INV, 64)  # Thực hiện hoán vị cuối IP nghịch đảo.
-    return ket_qua.to_bytes(8, "big")  # Đổi kết quả 64 bit về đúng 8 byte.
+def _bit_thanh_byte(cac_bit: list[int]) -> bytes:  # Hàm tự viết, xử lý bằng danh sách và phép toán số học.
+    cac_byte = []  # Khởi tạo danh sách kết quả rỗng.
+    for vi_tri in range(0, len(cac_bit), 8):  # Duyệt lần lượt các phần tử cần xử lý.
+        cac_byte.append(_bit_thanh_so(cac_bit[vi_tri:vi_tri + 8]))  # Đọc từng nhóm 8 ô thành một byte.
+    return bytes(cac_byte)  # Trả kết quả đã tạo.
+
+
+def _xor(trai: list[int], phai: list[int]) -> list[int]:  # Hàm tự viết, xử lý bằng danh sách và phép toán số học.
+    """Hai bit khác nhau cho 1, giống nhau cho 0."""
+    ket_qua = []  # Khởi tạo danh sách kết quả rỗng.
+    for vi_tri in range(len(trai)):  # Duyệt lần lượt các phần tử cần xử lý.
+        ket_qua.append((trai[vi_tri] + phai[vi_tri]) % 2)  # Hai ô giống nhau cho 0, khác nhau cho 1.
+    return ket_qua  # Trả kết quả đã tạo.
+
+
+def _hoan_vi(khoi: list[int], bang: list[int]) -> list[int]:  # Hàm tự viết, xử lý bằng danh sách và phép toán số học.
+    ket_qua = []  # Khởi tạo danh sách kết quả rỗng.
+    for vi_tri in bang:  # Duyệt lần lượt các phần tử cần xử lý.
+        ket_qua.append(khoi[vi_tri - 1])  # Bảng DES đếm từ 1; chỉ số danh sách đếm từ 0.
+    return ket_qua  # Trả kết quả đã tạo.
+
+
+def _tao_khoa_con(khoa: bytes) -> list[list[int]]:  # Hàm tự viết, xử lý bằng danh sách và phép toán số học.
+    khoa_64_bit = _byte_thanh_bit(khoa)  # Khóa 8 byte trở thành mảng 64 phần tử.
+    khoa_56_bit = _hoan_vi(khoa_64_bit, _DES_PC1)  # PC-1 chọn 56 ô, bỏ các bit chẵn lẻ.
+    trai = khoa_56_bit[:28]  # C0 lấy 28 phần tử đầu.
+    phai = khoa_56_bit[28:]  # D0 lấy 28 phần tử còn lại.
+    cac_khoa_con = []  # Khởi tạo danh sách kết quả rỗng.
+    for so_dich in _DES_SHIFTS:  # Duyệt lần lượt các phần tử cần xử lý.
+        trai = trai[so_dich:] + trai[:so_dich]  # Đưa các phần tử đầu sang cuối để dịch vòng C.
+        phai = phai[so_dich:] + phai[:so_dich]  # Dịch vòng D tương tự C.
+        ghep = trai + phai  # Nối hai nửa thành 56 ô.
+        cac_khoa_con.append(_hoan_vi(ghep, _DES_PC2))  # PC-2 chọn 48 ô cho khóa con vòng này.
+    return cac_khoa_con  # Trả kết quả đã tạo.
+
+
+def _ham_f(phai: list[int], khoa_con: list[int]) -> list[int]:  # Hàm tự viết, xử lý bằng danh sách và phép toán số học.
+    mo_rong = _hoan_vi(phai, _DES_E)  # E chọn lặp một số ô, mở rộng 32 thành 48.
+    tron_khoa = _xor(mo_rong, khoa_con)  # XOR từng cặp ô với khóa con.
+    thay_the = []  # Khởi tạo danh sách kết quả rỗng.
+    for chi_so in range(8):  # Duyệt lần lượt các phần tử cần xử lý.
+        nhom = tron_khoa[6 * chi_so:6 * chi_so + 6]  # Cắt đúng 6 ô dành cho S-box đang xét.
+        hang = _bit_thanh_so([nhom[0], nhom[5]])  # Hai ô ngoài chọn hàng 0 đến 3.
+        cot = _bit_thanh_so(nhom[1:5])  # Bốn ô giữa chọn cột 0 đến 15.
+        gia_tri = _DES_S[chi_so][hang][cot]  # Tra phần tử trong ma trận S-box.
+        thay_the.extend(_so_thanh_bit(gia_tri, 4))  # Nối 4 bit của kết quả vào mảng sau thay thế.
+    return _hoan_vi(thay_the, _DES_P)  # Hoán vị mảng 32 phần tử sau S-box.
+
+
+def _bien_doi_khoi(khoi: bytes, cac_khoa_con: list[list[int]]) -> bytes:  # Hàm tự viết, xử lý bằng danh sách và phép toán số học.
+    cac_bit = _byte_thanh_bit(khoi)  # Biểu diễn khối 8 byte bằng mảng 64 ô.
+    ban_dau = _hoan_vi(cac_bit, _DES_IP)  # Đổi thứ tự các ô theo IP.
+    trai = ban_dau[:32]  # L0 lấy 32 ô đầu.
+    phai = ban_dau[32:]  # R0 lấy 32 ô sau.
+    for khoa_con in cac_khoa_con:  # Duyệt lần lượt các phần tử cần xử lý.
+        trai_moi = phai  # Trái mới lấy nguyên mảng phải cũ.
+        phai_moi = _xor(trai, _ham_f(phai, khoa_con))  # Phải mới lấy trái cũ XOR với F của phải cũ.
+        trai, phai = trai_moi, phai_moi  # Cập nhật sau khi đã tính xong hai mảng mới.
+    ghep = phai + trai  # Sau vòng 16, R16 đứng trước L16.
+    ket_qua = _hoan_vi(ghep, _DES_IP_INV)  # Hoán vị cuối bằng IP nghịch đảo.
+    return _bit_thanh_byte(ket_qua)  # Đóng gói mảng 64 bit về 8 byte.
+
 
 
 def _kiem_tra_khoa(khoa: bytes) -> None:  # Chặn khóa sai trước khi thực hiện thuật toán.
